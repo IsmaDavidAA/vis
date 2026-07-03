@@ -18,6 +18,8 @@ export function OnboardingPage() {
   const navigate = useNavigate()
   const { user, refreshProfile } = useAuth()
   const [step, setStep] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [data, setData] = useState<OnboardingData>({
     current_state: '',
     goals: {},
@@ -45,29 +47,41 @@ export function OnboardingPage() {
 
   const handleFinish = async () => {
     if (!user) return
+    setSaveError('')
+    setSaving(true)
 
-    if (!isSupabaseConfigured) {
-      localStore.saveOnboarding(data)
-      await refreshProfile()
-      navigate('/dashboard')
-      return
-    }
+    try {
+      if (!isSupabaseConfigured) {
+        localStore.saveOnboarding(data)
+        await refreshProfile()
+        navigate('/dashboard')
+        return
+      }
 
-    if (supabase) {
-      await supabase.from('profiles').upsert({
-        user_id: user.id,
-        display_name: (user as { email?: string }).email?.split('@')[0] ?? 'Usuario',
-        current_state: data.current_state,
-        accountability_partner: data.accountability_partner,
-        december_feeling: data.december_feeling,
-        december_have: data.december_have,
-        december_left: data.december_left,
-        onboarding_complete: true,
-      })
+      if (!supabase) return
 
+      const { error: profileError } = await supabase.from('profiles').upsert(
+        {
+          user_id: user.id,
+          display_name: (user as { email?: string }).email?.split('@')[0] ?? 'Usuario',
+          current_state: data.current_state,
+          accountability_partner: data.accountability_partner,
+          december_feeling: data.december_feeling,
+          december_have: data.december_have,
+          december_left: data.december_left,
+          onboarding_complete: true,
+        },
+        { onConflict: 'user_id' },
+      )
+      if (profileError) throw profileError
+
+      // Reemplazar metas (evita duplicados si repite onboarding)
+      await supabase.from('goals').delete().eq('user_id', user.id)
+
+      const goalRows = []
       for (const [category, title] of Object.entries(data.goals)) {
         if (title) {
-          await supabase.from('goals').insert({
+          goalRows.push({
             user_id: user.id,
             category,
             title,
@@ -76,10 +90,9 @@ export function OnboardingPage() {
           })
         }
       }
-
       for (const rel of data.relationships) {
         if (rel.name) {
-          await supabase.from('goals').insert({
+          goalRows.push({
             user_id: user.id,
             category: 'relaciones',
             title: rel.name,
@@ -89,20 +102,37 @@ export function OnboardingPage() {
           })
         }
       }
+      if (goalRows.length > 0) {
+        const { error: goalsError } = await supabase.from('goals').insert(goalRows)
+        if (goalsError) throw goalsError
+      }
 
-      for (const [month, title] of Object.entries(data.non_negotiables)) {
-        if (title) {
-          await supabase.from('monthly_non_negotiables').insert({
-            user_id: user.id,
-            month,
-            title,
-          })
-        }
+      const nonNegRows = Object.entries(data.non_negotiables)
+        .filter(([, title]) => title)
+        .map(([month, title]) => ({
+          user_id: user.id,
+          month,
+          title: title!,
+        }))
+
+      if (nonNegRows.length > 0) {
+        const { error: nonNegError } = await supabase
+          .from('monthly_non_negotiables')
+          .upsert(nonNegRows, { onConflict: 'user_id,month' })
+        if (nonNegError) throw nonNegError
       }
 
       await refreshProfile()
+      navigate('/dashboard')
+    } catch (err: unknown) {
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: string }).message)
+          : 'Error al guardar tu plan'
+      setSaveError(message)
+    } finally {
+      setSaving(false)
     }
-    navigate('/dashboard')
   }
 
   const steps = [
@@ -268,6 +298,7 @@ export function OnboardingPage() {
       </div>
 
       <div className="flex-1 px-6 py-6 max-w-lg mx-auto w-full">
+        {saveError && <Alert type="error" message={saveError} onClose={() => setSaveError('')} />}
         {steps[step]}
       </div>
 
@@ -279,8 +310,8 @@ export function OnboardingPage() {
             </Button>
           )}
           {isLast ? (
-            <Button fullWidth size="lg" onClick={handleFinish}>
-              {MESSAGES.completeAction}
+            <Button fullWidth size="lg" onClick={handleFinish} disabled={saving}>
+              {saving ? 'Guardando...' : MESSAGES.completeAction}
             </Button>
           ) : (
             <Button fullWidth size="lg" onClick={() => setStep(step + 1)}>
