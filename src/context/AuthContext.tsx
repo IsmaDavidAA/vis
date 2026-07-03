@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { User } from '@supabase/supabase-js'
-import { supabase, isSupabaseConfigured } from '../lib/supabase'
+import { supabase, isSupabaseConfigured, getAuthRedirectUrl } from '../lib/supabase'
 import { localStore } from '../lib/localStore'
 import type { Profile, UserStats } from '../types'
 import { MAX_LIVES } from '../data/constants'
@@ -129,33 +129,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error: null }
     }
     if (!supabase) return { error: 'Supabase no configurado' }
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { display_name: displayName } },
+      options: {
+        data: { display_name: displayName },
+        emailRedirectTo: getAuthRedirectUrl(),
+      },
     })
     if (error) return { error: error.message }
-    if (data.user) {
-      await supabase.from('profiles').insert({
-        user_id: data.user.id,
-        display_name: displayName,
-        current_state: '',
-        accountability_partner: '',
-        december_feeling: '',
-        december_have: '',
-        december_left: '',
-        onboarding_complete: false,
-      })
-      await supabase.from('user_stats').insert({
-        user_id: data.user.id,
-        total_points: 0,
-        lives: MAX_LIVES,
-        max_lives: MAX_LIVES,
-        streak: 0,
-        stars_earned: 0,
-        fails: 0,
-      })
-    }
+    // profile + user_stats los crea el trigger handle_new_user en Supabase
     return { error: null }
   }
 

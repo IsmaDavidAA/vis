@@ -11,8 +11,20 @@ export const isSupabaseConfigured = Boolean(
 )
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(supabaseUrl!, supabaseAnonKey!)
+  ? createClient(supabaseUrl!, supabaseAnonKey!, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true,
+        flowType: 'pkce',
+      },
+    })
   : null
+
+export function getAuthRedirectUrl(): string {
+  const base = import.meta.env.BASE_URL || '/'
+  return `${window.location.origin}${base}`.replace(/\/+$/, '') + '/'
+}
 
 export type Database = {
   public: {

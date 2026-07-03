@@ -33,9 +33,19 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/iniciar-sesion" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/registro" element={<RegisterPage />} />
       <Route
         path="/onboarding"
+        element={
+          <ProtectedRoute>
+            <OnboardingPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/confirmar-plan"
         element={
           <ProtectedRoute>
             <OnboardingPage />
