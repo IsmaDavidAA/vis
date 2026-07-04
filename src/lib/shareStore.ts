@@ -1,5 +1,5 @@
 import type { PublicProfileSnapshot, UserMetric, MetricEntry } from '../types'
-import { METRIC_TEMPLATES } from '../data/metricTemplates'
+import { resolveMetricTemplate } from './metricResolver'
 import { computeMetricCompliance, computeOverallCompliance } from './metrics'
 import { localStore } from './localStore'
 
@@ -33,7 +33,8 @@ function buildSnapshot(
   const metricSnapshots = metrics
     .filter((m) => m.active)
     .map((m) => {
-      const template = METRIC_TEMPLATES.find((t) => t.id === m.template_id)!
+      const template = resolveMetricTemplate(m)
+      if (!template) return null
       const compliance = computeMetricCompliance(m, template, entries, 'week')
       const today = new Date().toISOString().split('T')[0]
       const todayValue = entries
@@ -49,13 +50,16 @@ function buildSnapshot(
         type: template.type,
       }
     })
+    .filter(Boolean) as PublicProfileSnapshot['metrics']
 
   const compliances = metrics
     .filter((m) => m.active)
     .map((m) => {
-      const template = METRIC_TEMPLATES.find((t) => t.id === m.template_id)!
+      const template = resolveMetricTemplate(m)
+      if (!template) return null
       return computeMetricCompliance(m, template, entries, 'week')
     })
+    .filter(Boolean) as ReturnType<typeof computeMetricCompliance>[]
 
   return {
     share_code: shareCode,

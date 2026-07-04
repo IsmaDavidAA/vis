@@ -1,0 +1,17 @@
+# Config mínima para Edge Functions
+# https://supabase.com/docs/guides/cli/config
+
+[project]
+# Se rellena al hacer: npx supabase link
+
+[functions.telegram-webhook]
+verify_jwt = false
+
+[functions.telegram-notify]
+verify_jwt = true
+
+[functions.telegram-daily]
+verify_jwt = false
+
+[functions.generate-metrics]
+verify_jwt = true

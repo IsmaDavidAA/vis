@@ -8,8 +8,10 @@ import { Alert } from '../components/ui/Alert'
 import { MESSAGES } from '../data/messages'
 import { GOAL_CATEGORIES, MONTHS } from '../data/constants'
 import { localStore } from '../lib/localStore'
+import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
-import type { GoalCategory, Month, OnboardingData } from '../types'
+import { GeneratedMetricsPicker } from '../components/GeneratedMetricsPicker'
+import type { GoalCategory, Month, OnboardingData, CategoryMetricPlan } from '../types'
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 
 const TOTAL_STEPS = 8
@@ -31,7 +33,19 @@ export function OnboardingPage() {
     december_have: '',
     december_left: '',
     accountability_partner: '',
+    metricPlans: {},
   })
+
+  const updateMetricPlan = (category: GoalCategory, plan: CategoryMetricPlan | undefined) => {
+    setData((d) => ({
+      ...d,
+      metricPlans: plan
+        ? { ...d.metricPlans, [category]: plan }
+        : Object.fromEntries(
+            Object.entries(d.metricPlans).filter(([k]) => k !== category),
+          ),
+    }))
+  }
 
   const updateGoal = (category: GoalCategory, value: string) => {
     setData((d) => ({ ...d, goals: { ...d.goals, [category]: value } }))
@@ -121,6 +135,9 @@ export function OnboardingPage() {
           .upsert(nonNegRows, { onConflict: 'user_id,month' })
         if (nonNegError) throw nonNegError
       }
+
+      const { error: metricsError } = await api.addMetricPlans(user.id, data.metricPlans)
+      if (metricsError) throw new Error(metricsError)
 
       await refreshProfile()
       navigate('/dashboard')
@@ -213,6 +230,15 @@ export function OnboardingPage() {
                 value={data.learn_how}
                 onChange={(e) => setData((d) => ({ ...d, learn_how: e.target.value }))}
                 placeholder="Tu plan concreto..."
+              />
+            )}
+            {data.goals[cat.id]?.trim() && (
+              <GeneratedMetricsPicker
+                category={cat.id}
+                goal={data.goals[cat.id] ?? ''}
+                context={cat.id === 'aprender' ? data.learn_how : undefined}
+                plan={data.metricPlans[cat.id]}
+                onPlanChange={(plan) => updateMetricPlan(cat.id, plan)}
               />
             )}
           </>

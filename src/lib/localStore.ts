@@ -1,6 +1,8 @@
-import type { Profile, Goal, Checkin, UserStats, MonthlyNonNegotiable, OnboardingData, UserMetric, MetricEntry } from '../types'
+import type { Profile, Goal, Checkin, UserStats, MonthlyNonNegotiable, OnboardingData, UserMetric, MetricEntry, GeneratedMetricSuggestion, GoalCategory, MetricDifficulty } from '../types'
 import { MAX_LIVES, POINTS, DEFAULT_PRIZES, PRIZE_UNLOCK_POINTS } from '../data/constants'
-import { METRIC_TEMPLATES } from '../data/metricTemplates'
+import { METRIC_TEMPLATES, getTemplateById } from '../data/metricTemplates'
+import { resolveMetricTemplate } from './metricResolver'
+import { DIFFICULTY_COUNT } from './metricsAi'
 
 const STORAGE_KEY = 'vis_local_data'
 const PRIZES_VERSION = 3
@@ -198,7 +200,50 @@ export const localStore = {
       }
     }
 
+    for (const [category, plan] of Object.entries(onboarding.metricPlans ?? {})) {
+      if (!plan?.accepted) continue
+      const filled = plan.metrics.filter((m) => m.title?.trim())
+      if (filled.length !== DIFFICULTY_COUNT[plan.difficulty]) continue
+      for (const suggestion of filled) {
+        this.addGeneratedMetric(suggestion, category as GoalCategory, plan.difficulty)
+      }
+    }
+
     saveData(data)
+  },
+
+  addGeneratedMetric(
+    suggestion: GeneratedMetricSuggestion,
+    category: GoalCategory,
+    difficulty: MetricDifficulty,
+  ): UserMetric | null {
+    const data = getData()
+    if (!data) return null
+
+    if (suggestion.templateId && getTemplateById(suggestion.templateId)) {
+      return this.addMetric(suggestion.templateId)
+    }
+
+    const templateId = `custom-${generateId()}`
+    const metric: UserMetric = {
+      id: generateId(),
+      user_id: data.userId,
+      template_id: templateId,
+      daily_target: suggestion.dailyTarget,
+      active: true,
+      created_at: new Date().toISOString(),
+      is_custom: true,
+      custom_title: suggestion.title,
+      custom_icon: suggestion.icon,
+      custom_description: suggestion.description,
+      custom_type: suggestion.type,
+      custom_unit: suggestion.unit,
+      goal_category: category,
+      difficulty,
+    }
+    data.metrics.push(metric)
+    saveData(data)
+    return metric
   },
 
   updateShareSettings(shareCode: string, enabled: boolean) {
@@ -268,7 +313,7 @@ export const localStore = {
 
     // Award points when target met for the first time today
     const metric = data.metrics.find((m) => m.id === metricId)
-    const template = metric ? METRIC_TEMPLATES.find((t) => t.id === metric.template_id) : null
+    const template = metric ? resolveMetricTemplate(metric) : null
     if (metric && template) {
       const target = metric.daily_target
       const prevValue = existing?.value ?? 0

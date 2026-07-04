@@ -73,6 +73,14 @@ CREATE TABLE IF NOT EXISTS user_metrics (
   template_id TEXT NOT NULL,
   daily_target INTEGER NOT NULL DEFAULT 1,
   active BOOLEAN DEFAULT TRUE,
+  is_custom BOOLEAN DEFAULT FALSE,
+  custom_title TEXT,
+  custom_icon TEXT DEFAULT '✨',
+  custom_description TEXT DEFAULT '',
+  custom_type TEXT DEFAULT 'boolean',
+  custom_unit TEXT,
+  goal_category TEXT,
+  difficulty TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(user_id, template_id)
 );
@@ -103,6 +111,11 @@ CREATE TABLE IF NOT EXISTS user_prize_collection (
 -- Columnas extra si profiles ya existía sin ellas
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS share_code TEXT UNIQUE;
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS sharing_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS telegram_chat_id TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS telegram_username TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS telegram_link_code TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS telegram_notify BOOLEAN DEFAULT TRUE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS partner_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
 
 -- ─── Premios iniciales ────────────────────────────────────────────────────
 
@@ -146,8 +159,43 @@ DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
 DROP POLICY IF EXISTS "Users can insert own profile" ON profiles;
 DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
 DROP POLICY IF EXISTS "View shared profiles" ON profiles;
-CREATE POLICY "Users can view own profile" ON profiles FOR SELECT
-  USING (auth.uid() = user_id OR sharing_enabled = true);
+DROP POLICY IF EXISTS "Partners can view partner profile" ON profiles;
+DROP POLICY IF EXISTS "Users can view profiles" ON profiles;
+
+CREATE OR REPLACE FUNCTION public.auth_partner_user_id()
+RETURNS UUID
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT partner_user_id FROM public.profiles WHERE user_id = auth.uid() LIMIT 1;
+$$;
+
+CREATE OR REPLACE FUNCTION public.lookup_profile_by_code(p_code TEXT)
+RETURNS TABLE (user_id UUID, display_name TEXT, partner_user_id UUID)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT p.user_id, p.display_name, p.partner_user_id
+  FROM public.profiles p
+  WHERE UPPER(p.share_code) = UPPER(TRIM(p_code))
+     OR UPPER(p.telegram_link_code) = UPPER(TRIM(p_code))
+  LIMIT 1;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.auth_partner_user_id() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.lookup_profile_by_code(TEXT) TO authenticated;
+
+CREATE POLICY "Users can view profiles" ON profiles FOR SELECT
+  USING (
+    auth.uid() = user_id
+    OR sharing_enabled = true
+    OR auth.uid() = partner_user_id
+    OR user_id = public.auth_partner_user_id()
+  );
 CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE

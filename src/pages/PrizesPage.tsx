@@ -8,7 +8,8 @@ import { MESSAGES } from '../data/messages'
 import { DEFAULT_PRIZES, PRIZE_UNLOCK_POINTS } from '../data/constants'
 import { useAuth } from '../context/AuthContext'
 import { localStore } from '../lib/localStore'
-import { supabase } from '../lib/supabase'
+import { api } from '../lib/api'
+import { notifyPartner } from '../lib/telegram'
 import type { Prize } from '../types'
 
 export function PrizesPage() {
@@ -19,37 +20,59 @@ export function PrizesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
-  const refresh = () => {
+  const refresh = async () => {
     if (isDemoMode) {
       setCollected(localStore.getCollectedPrizes())
       setSlots(localStore.getAvailableCollectionSlots())
+      return
     }
+    if (!user) return
+    const owned = await api.getCollectedPrizes(user.id)
+    setCollected(owned)
+    const earned = Math.floor(stats.total_points / PRIZE_UNLOCK_POINTS)
+    setSlots(Math.max(0, earned - owned.length))
   }
 
   useEffect(() => {
     refresh()
-  }, [isDemoMode, stats.total_points])
+  }, [isDemoMode, stats.total_points, user?.id])
 
-  const handleCollect = (prizeId: string) => {
+  const handleCollect = async (prizeId: string) => {
+    const prize = prizes.find((p) => p.id === prizeId)
+
     if (isDemoMode) {
       const result = localStore.collectPrize(prizeId)
       if (result.ok) {
         setAlert({ type: 'success', message: '¡Figurita desbloqueada! 🎉' })
-        refresh()
+        await refresh()
         setSelectedId(prizeId)
       } else {
         setAlert({ type: 'error', message: result.error ?? 'No se pudo coleccionar' })
       }
       return
     }
-    if (supabase && user) {
-      // Supabase collection would go here
-      setAlert({ type: 'success', message: '¡Figurita desbloqueada!' })
+
+    if (!user) return
+    const { error } = await api.collectPrize(user.id, prizeId, stats.total_points)
+    if (error) {
+      setAlert({ type: 'error', message: error })
+      return
+    }
+    await refresh()
+    setSelectedId(prizeId)
+    setAlert({ type: 'success', message: '¡Figurita desbloqueada! 🎉' })
+    if (prize) {
+      await notifyPartner(
+        'prize_collected',
+        { prize_title: prize.title, title: prize.title, description: prize.description },
+        `prize_collected:${prizeId}`,
+      )
     }
   }
 
   const selected = prizes.find((p) => p.id === selectedId)
-  const nextUnlockAt = (Math.floor(stats.total_points / PRIZE_UNLOCK_POINTS) + 1) * PRIZE_UNLOCK_POINTS
+  const nextUnlockAt =
+    (Math.floor(stats.total_points / PRIZE_UNLOCK_POINTS) + 1) * PRIZE_UNLOCK_POINTS
 
   return (
     <AppLayout>
