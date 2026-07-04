@@ -72,7 +72,7 @@ export function MetricsPage() {
     })
     .filter(Boolean) as ReturnType<typeof computeMetricCompliance>[]
   const overall = computeOverallCompliance(compliances)
-  const completionMap = buildCompletionMap([], metrics, entries)
+  const completionMap = buildCompletionMap(metrics, entries)
   const now = new Date()
 
   const refresh = async () => {

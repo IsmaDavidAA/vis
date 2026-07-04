@@ -1,4 +1,4 @@
-import type { Checkin, UserMetric, MetricEntry, Goal } from '../types'
+import type { UserMetric, MetricEntry } from '../types'
 import { resolveMetricTemplate } from '../lib/metricResolver'
 import { Card } from './ui/Card'
 
@@ -152,11 +152,9 @@ export function MonthHeatmap({ year, month, completedByDate, maxPerDay = 1 }: Mo
 interface HabitWeekGridProps {
   metrics: UserMetric[]
   entries: MetricEntry[]
-  goals?: Goal[]
-  checkins?: Checkin[]
 }
 
-export function HabitWeekGrid({ metrics, entries, goals = [], checkins = [] }: HabitWeekGridProps) {
+export function HabitWeekGrid({ metrics, entries }: HabitWeekGridProps) {
   const start = startOfWeek(new Date())
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(start)
@@ -176,13 +174,6 @@ export function HabitWeekGrid({ metrics, entries, goals = [], checkins = [] }: H
       return template.type === 'boolean' ? value >= 1 : value >= m.daily_target
     })
     rows.push({ id: m.id, icon: template.icon, title: template.title, done })
-  }
-
-  for (const g of goals.slice(0, 6)) {
-    const done = days.map((date) =>
-      checkins.some((c) => c.goal_id === g.id && c.date === date && c.completed),
-    )
-    rows.push({ id: g.id, icon: '🎯', title: g.title, done })
   }
 
   if (rows.length === 0) return null
@@ -247,20 +238,14 @@ export function HabitWeekGrid({ metrics, entries, goals = [], checkins = [] }: H
   )
 }
 
-/** Build map date -> count of completed items */
+/** Build map date -> count of completed habits (metrics only) */
 export function buildCompletionMap(
-  checkins: Checkin[],
   metrics: UserMetric[],
   entries: MetricEntry[],
 ): Record<string, number> {
   const map: Record<string, number> = {}
 
-  for (const c of checkins) {
-    if (!c.completed) continue
-    map[c.date] = (map[c.date] ?? 0) + 1
-  }
-
-  for (const m of metrics) {
+  for (const m of metrics.filter((x) => x.active)) {
     const template = resolveMetricTemplate(m)
     if (!template) continue
     for (const e of entries.filter((x) => x.metric_id === m.id)) {

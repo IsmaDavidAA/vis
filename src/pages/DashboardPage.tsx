@@ -17,7 +17,7 @@ import { computeMetricCompliance, computeOverallCompliance } from '../lib/metric
 import { useAuth } from '../context/AuthContext'
 import { localStore } from '../lib/localStore'
 import { api } from '../lib/api'
-import type { Goal, Checkin, UserMetric, MetricEntry } from '../types'
+import type { UserMetric, MetricEntry } from '../types'
 
 function todayStr() {
   return new Date().toISOString().split('T')[0]
@@ -25,29 +25,21 @@ function todayStr() {
 
 export function DashboardPage() {
   const { user, profile, stats, isDemoMode } = useAuth()
-  const [goals, setGoals] = useState<Goal[]>([])
-  const [allCheckins, setAllCheckins] = useState<Checkin[]>([])
   const [metrics, setMetrics] = useState<UserMetric[]>([])
   const [metricEntries, setMetricEntries] = useState<MetricEntry[]>([])
   const [selectedDate, setSelectedDate] = useState(todayStr())
 
   const loadData = useCallback(async () => {
     if (isDemoMode) {
-      setGoals(localStore.getGoals())
-      setAllCheckins(localStore.getCheckins())
       setMetrics(localStore.getMetrics())
       setMetricEntries(localStore.getMetricEntries())
       return
     }
     if (!user) return
-    const [g, c, m, e] = await Promise.all([
-      api.getGoals(user.id),
-      api.getCheckins(user.id),
+    const [m, e] = await Promise.all([
       api.getMetrics(user.id),
       api.getMetricEntries(user.id),
     ])
-    setGoals(g)
-    setAllCheckins(c)
     setMetrics(m)
     setMetricEntries(e)
   }, [isDemoMode, user])
@@ -67,9 +59,9 @@ export function DashboardPage() {
       .filter(Boolean) as ReturnType<typeof computeMetricCompliance>[],
   )
 
-  const completionMap = buildCompletionMap(allCheckins, metrics, metricEntries)
+  const completionMap = buildCompletionMap(metrics, metricEntries)
   const now = new Date()
-  const maxPerDay = Math.max(1, goals.length + activeMetrics.length)
+  const maxPerDay = Math.max(1, activeMetrics.length)
 
   if (!profile?.onboarding_complete) {
     return (
@@ -129,12 +121,7 @@ export function DashboardPage() {
           </Card>
         )}
 
-        <HabitWeekGrid
-          metrics={metrics}
-          entries={metricEntries}
-          goals={goals}
-          checkins={allCheckins}
-        />
+        <HabitWeekGrid metrics={metrics} entries={metricEntries} />
 
         <MonthHeatmap
           year={now.getFullYear()}
