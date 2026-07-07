@@ -10,6 +10,7 @@ import { LeaderboardPage } from './pages/LeaderboardPage'
 import { MetricsPage } from './pages/MetricsPage'
 import { PrizesPage } from './pages/PrizesPage'
 import { SharedProgressPage } from './pages/SharedProgressPage'
+import { CompetitorsPage } from './pages/CompetitorsPage'
 import { AlertsPage } from './pages/AlertsPage'
 import type { ReactNode } from 'react'
 
@@ -90,6 +91,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PrizesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/competitors"
+        element={
+          <ProtectedRoute>
+            <CompetitorsPage />
           </ProtectedRoute>
         }
       />

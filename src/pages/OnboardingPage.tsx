@@ -116,9 +116,16 @@ export function OnboardingPage() {
           })
         }
       }
+      let goalIdsByCategory: Partial<Record<string, string>> = {}
       if (goalRows.length > 0) {
-        const { error: goalsError } = await supabase.from('goals').insert(goalRows)
+        const { data: insertedGoals, error: goalsError } = await supabase
+          .from('goals')
+          .insert(goalRows)
+          .select('id, category')
         if (goalsError) throw goalsError
+        for (const g of insertedGoals ?? []) {
+          if (!goalIdsByCategory[g.category]) goalIdsByCategory[g.category] = g.id
+        }
       }
 
       const nonNegRows = Object.entries(data.non_negotiables)
@@ -136,7 +143,11 @@ export function OnboardingPage() {
         if (nonNegError) throw nonNegError
       }
 
-      const { error: metricsError } = await api.addMetricPlans(user.id, data.metricPlans)
+      const { error: metricsError } = await api.addMetricPlans(
+        user.id,
+        data.metricPlans,
+        goalIdsByCategory,
+      )
       if (metricsError) throw new Error(metricsError)
 
       await refreshProfile()

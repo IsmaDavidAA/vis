@@ -36,7 +36,8 @@ export interface Profile {
 export interface Goal {
   id: string
   user_id: string
-  category: GoalCategory
+  /** Section id: built-in (salud, dinero…) or custom-cat-{uuid} */
+  category: string
   title: string
   description?: string
   month?: Month
@@ -63,6 +64,24 @@ export interface Checkin {
   points: number
 }
 
+export type GoalConfirmationStatus = 'pending' | 'confirmed' | 'rejected'
+
+export interface GoalConfirmationRequest {
+  id: string
+  user_id: string
+  goal_id: string
+  goal_title: string
+  goal_category: string
+  requester_name: string
+  date: string
+  confirmer_share_code: string
+  status: GoalConfirmationStatus
+  requester_note?: string
+  confirmed_by?: string | null
+  confirmed_at?: string | null
+  created_at: string
+}
+
 export interface UserStats {
   user_id: string
   total_points: number
@@ -80,6 +99,32 @@ export interface Prize {
   icon: string
   color: string
   is_double?: boolean
+  streakRequired: number
+}
+
+export interface UserMetricCategory {
+  id: string
+  user_id: string
+  label: string
+  icon: string
+  created_at: string
+}
+
+export interface Competitor {
+  id: string
+  user_id: string
+  share_code: string
+  display_name: string
+  created_at: string
+}
+
+export interface CompetitorComparison {
+  share_code: string
+  display_name: string
+  weekly_compliance: number
+  streak: number
+  total_points: number
+  is_me?: boolean
 }
 
 export interface LeaderboardEntry {
@@ -138,6 +183,7 @@ export interface UserMetric {
   custom_type?: 'counter' | 'boolean' | null
   custom_unit?: string | null
   goal_category?: string | null
+  goal_id?: string | null
   difficulty?: MetricDifficulty | null
 }
 

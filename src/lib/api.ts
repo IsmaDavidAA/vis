@@ -2,11 +2,14 @@ import { supabase } from './supabase'
 import { getTemplateById } from '../data/metricTemplates'
 import { resolveMetricTemplate } from './metricResolver'
 import { DIFFICULTY_COUNT } from './metricsAi'
+import { canUnlockPrize } from './prizes'
+import { DEFAULT_PRIZES } from '../data/constants'
 import { POINTS, MAX_LIVES } from '../data/constants'
 import {
   computeMetricCompliance,
   computeOverallCompliance,
 } from './metrics'
+import { buildComparisonList } from './competitors'
 import type {
   UserMetric,
   MetricEntry,
@@ -19,6 +22,10 @@ import type {
   GoalCategory,
   MetricDifficulty,
   CategoryMetricPlan,
+  UserMetricCategory,
+  Competitor,
+  CompetitorComparison,
+  GoalConfirmationRequest,
 } from '../types'
 
 function todayStr() {
@@ -76,6 +83,62 @@ export const api = {
     return (data as Goal[]) ?? []
   },
 
+  async createGoal(
+    userId: string,
+    data: {
+      category: string
+      title: string
+      relationship_change?: string
+      learn_how?: string
+    },
+  ): Promise<{ goal: Goal | null; error: string | null }> {
+    if (!supabase) return { goal: null, error: 'No conectado' }
+    if (!data.title.trim()) return { goal: null, error: 'Escribe el nombre de la meta' }
+
+    const { data: goal, error } = await supabase
+      .from('goals')
+      .insert({
+        user_id: userId,
+        category: data.category,
+        title: data.title.trim(),
+        relationship_change: data.relationship_change?.trim() || null,
+        learn_how: data.learn_how?.trim() || null,
+        is_non_negotiable: false,
+      })
+      .select()
+      .single()
+
+    return { goal: goal as Goal | null, error: error?.message ?? null }
+  },
+
+  async deleteGoal(userId: string, goalId: string): Promise<{ error: string | null }> {
+    if (!supabase) return { error: 'No conectado' }
+
+    const { data: metricRows } = await supabase
+      .from('user_metrics')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('goal_id', goalId)
+
+    const metricIds = metricRows?.map((m) => m.id) ?? []
+    if (metricIds.length > 0) {
+      await supabase
+        .from('metric_entries')
+        .delete()
+        .eq('user_id', userId)
+        .in('metric_id', metricIds)
+      await supabase.from('user_metrics').delete().eq('user_id', userId).eq('goal_id', goalId)
+    }
+
+    const { error } = await supabase
+      .from('goals')
+      .delete()
+      .eq('user_id', userId)
+      .eq('id', goalId)
+
+    return { error: error?.message ?? null }
+  },
+
   async getCheckins(userId: string, date?: string): Promise<Checkin[]> {
     if (!supabase) return []
     let q = supabase.from('checkins').select('*').eq('user_id', userId)
@@ -114,7 +177,12 @@ export const api = {
     return (data as MetricEntry[]) ?? []
   },
 
-  async addMetric(userId: string, templateId: string): Promise<{ error: string | null }> {
+  async addMetric(
+    userId: string,
+    templateId: string,
+    goalId?: string,
+    sectionId?: string,
+  ): Promise<{ error: string | null }> {
     if (!supabase) return { error: 'No conectado' }
     const template = getTemplateById(templateId)
     if (!template) return { error: 'Métrica no encontrada' }
@@ -125,6 +193,8 @@ export const api = {
         template_id: templateId,
         daily_target: template.dailyTarget,
         active: true,
+        goal_category: sectionId ?? template.category,
+        goal_id: goalId ?? null,
       },
       { onConflict: 'user_id,template_id' },
     )
@@ -434,21 +504,21 @@ export const api = {
   async collectPrize(
     userId: string,
     prizeId: string,
+    streak: number,
     totalPoints: number,
   ): Promise<{ error: string | null }> {
     if (!supabase) return { error: 'No conectado' }
-    const unlockSlots = Math.floor(totalPoints / 50)
+    const prize = DEFAULT_PRIZES.find((p) => p.id === prizeId)
+    if (!prize) return { error: 'Premio no encontrado' }
+
     const { data: owned } = await supabase
       .from('user_prize_collection')
       .select('prize_id')
       .eq('user_id', userId)
-    const count = owned?.length ?? 0
-    if (count >= unlockSlots) {
-      return { error: 'Necesitas más puntos para otra figurita' }
-    }
-    if (owned?.some((p) => p.prize_id === prizeId)) {
-      return { error: 'Ya tienes esta figurita' }
-    }
+    const collected = (owned ?? []).map((p) => p.prize_id)
+    const check = canUnlockPrize(prize, streak, totalPoints, collected)
+    if (!check.ok) return { error: check.reason ?? 'No disponible' }
+
     const { error } = await supabase.from('user_prize_collection').insert({
       user_id: userId,
       prize_id: prizeId,
@@ -459,13 +529,14 @@ export const api = {
   async addGeneratedMetric(
     userId: string,
     suggestion: GeneratedMetricSuggestion,
-    category: GoalCategory,
+    category: GoalCategory | string,
     difficulty: MetricDifficulty,
+    goalId?: string,
   ): Promise<{ error: string | null }> {
     if (!supabase) return { error: 'No conectado' }
 
     if (suggestion.templateId && getTemplateById(suggestion.templateId)) {
-      return this.addMetric(userId, suggestion.templateId)
+      return this.addMetric(userId, suggestion.templateId, goalId, category)
     }
 
     const templateId = `custom-${crypto.randomUUID()}`
@@ -482,6 +553,7 @@ export const api = {
         custom_type: suggestion.type,
         custom_unit: suggestion.unit ?? null,
         goal_category: category,
+        goal_id: goalId ?? null,
         difficulty,
       },
       { onConflict: 'user_id,template_id' },
@@ -492,22 +564,156 @@ export const api = {
   async addMetricPlans(
     userId: string,
     plans: Partial<Record<GoalCategory, CategoryMetricPlan>>,
+    goalIdsByCategory?: Partial<Record<string, string>>,
   ): Promise<{ error: string | null }> {
     for (const [category, plan] of Object.entries(plans)) {
       if (!plan?.accepted) continue
       const filled = plan.metrics.filter((m) => m.title?.trim())
       if (filled.length !== DIFFICULTY_COUNT[plan.difficulty]) continue
+      const goalId = goalIdsByCategory?.[category]
       for (const metric of filled) {
         const { error } = await this.addGeneratedMetric(
           userId,
           metric,
           category as GoalCategory,
           plan.difficulty,
+          goalId,
         )
         if (error) return { error }
       }
     }
     return { error: null }
+  },
+
+  async addCustomHabit(
+    userId: string,
+    data: {
+      title: string
+      description?: string
+      icon?: string
+      category: string
+      goalId: string
+      type: 'boolean' | 'counter'
+      dailyTarget: number
+      unit?: string
+    },
+  ): Promise<{ error: string | null }> {
+    if (!data.title.trim()) return { error: 'Escribe un nombre para el hábito' }
+    if (!data.goalId) return { error: 'Selecciona la meta a la que pertenece' }
+    return this.addGeneratedMetric(
+      userId,
+      {
+        title: data.title.trim(),
+        description: data.description?.trim() ?? '',
+        icon: data.icon?.trim() || '✨',
+        type: data.type,
+        dailyTarget: data.type === 'boolean' ? 1 : Math.max(1, data.dailyTarget),
+        unit: data.unit,
+      },
+      data.category,
+      'medium',
+      data.goalId,
+    )
+  },
+
+  async getCustomCategories(userId: string): Promise<UserMetricCategory[]> {
+    if (!supabase) return []
+    const { data } = await supabase
+      .from('user_metric_categories')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at')
+    return (data as UserMetricCategory[]) ?? []
+  },
+
+  async addCustomCategory(
+    userId: string,
+    label: string,
+    icon = '✨',
+  ): Promise<{ category: UserMetricCategory | null; error: string | null }> {
+    if (!supabase) return { category: null, error: 'No conectado' }
+    if (!label.trim()) return { category: null, error: 'Escribe un nombre' }
+    const id = `custom-cat-${crypto.randomUUID()}`
+    const { data, error } = await supabase
+      .from('user_metric_categories')
+      .insert({ id, user_id: userId, label: label.trim(), icon })
+      .select()
+      .single()
+    return { category: data as UserMetricCategory | null, error: error?.message ?? null }
+  },
+
+  async removeCustomCategory(userId: string, categoryId: string): Promise<{ error: string | null }> {
+    if (!supabase) return { error: 'No conectado' }
+    const { error } = await supabase
+      .from('user_metric_categories')
+      .delete()
+      .eq('user_id', userId)
+      .eq('id', categoryId)
+    return { error: error?.message ?? null }
+  },
+
+  async getCompetitors(userId: string): Promise<Competitor[]> {
+    if (!supabase) return []
+    const { data } = await supabase
+      .from('user_competitors')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at')
+    return (data as Competitor[]) ?? []
+  },
+
+  async addCompetitor(
+    userId: string,
+    code: string,
+  ): Promise<{ competitor: Competitor | null; error: string | null }> {
+    if (!supabase) return { competitor: null, error: 'No conectado' }
+    const shareCode = code.trim().toUpperCase()
+    if (shareCode.length < 4) return { competitor: null, error: 'Código inválido' }
+
+    const snapshot = await this.getSharedProfile(shareCode)
+    if (!snapshot) {
+      return { competitor: null, error: 'Código no encontrado. La persona debe tener compartir activo.' }
+    }
+
+    const { data, error } = await supabase
+      .from('user_competitors')
+      .upsert(
+        {
+          user_id: userId,
+          share_code: shareCode,
+          display_name: snapshot.display_name,
+        },
+        { onConflict: 'user_id,share_code' },
+      )
+      .select()
+      .single()
+
+    return { competitor: data as Competitor | null, error: error?.message ?? null }
+  },
+
+  async removeCompetitor(userId: string, competitorId: string): Promise<{ error: string | null }> {
+    if (!supabase) return { error: 'No conectado' }
+    const { error } = await supabase
+      .from('user_competitors')
+      .delete()
+      .eq('user_id', userId)
+      .eq('id', competitorId)
+    return { error: error?.message ?? null }
+  },
+
+  async getWeeklyComparison(
+    userId: string,
+    displayName: string,
+    metrics: UserMetric[],
+    entries: MetricEntry[],
+    stats: UserStats,
+  ): Promise<CompetitorComparison[]> {
+    const competitors = await this.getCompetitors(userId)
+    const snapshots: Record<string, PublicProfileSnapshot | null> = {}
+    for (const c of competitors) {
+      snapshots[c.share_code] = await this.getSharedProfile(c.share_code)
+    }
+    return buildComparisonList(displayName, metrics, entries, stats, competitors, snapshots)
   },
 
   async getCollectedPrizes(userId: string): Promise<string[]> {
@@ -517,6 +723,98 @@ export const api = {
       .select('prize_id')
       .eq('user_id', userId)
     return (data ?? []).map((r) => r.prize_id)
+  },
+
+  async getGoalConfirmationRequests(
+    userId: string,
+    date?: string,
+  ): Promise<GoalConfirmationRequest[]> {
+    if (!supabase) return []
+    let q = supabase.from('goal_confirmation_requests').select('*').eq('user_id', userId)
+    if (date) q = q.eq('date', date)
+    const { data } = await q.order('created_at', { ascending: false })
+    return (data as GoalConfirmationRequest[]) ?? []
+  },
+
+  async getPendingGoalConfirmationsForMe(userId: string): Promise<GoalConfirmationRequest[]> {
+    if (!supabase) return []
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('share_code')
+      .eq('user_id', userId)
+      .single()
+    if (!profile?.share_code) return []
+    const { data } = await supabase
+      .from('goal_confirmation_requests')
+      .select('*')
+      .eq('confirmer_share_code', profile.share_code)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+    return (data as GoalConfirmationRequest[]) ?? []
+  },
+
+  async requestGoalConfirmation(
+    userId: string,
+    goal: Goal,
+    confirmerShareCode: string,
+    requesterName: string,
+    note = '',
+    date = todayStr(),
+  ): Promise<{ request: GoalConfirmationRequest | null; error: string | null }> {
+    if (!supabase) return { request: null, error: 'No conectado' }
+
+    const competitors = await this.getCompetitors(userId)
+    const code = confirmerShareCode.trim().toUpperCase()
+    if (!competitors.some((c) => c.share_code === code)) {
+      return { request: null, error: 'Ese amigo no está en tu lista de reto' }
+    }
+
+    const existing = await this.getGoalConfirmationRequests(userId, date)
+    const forGoal = existing.find((r) => r.goal_id === goal.id)
+    if (forGoal?.status === 'pending') {
+      return { request: null, error: 'Ya tienes una solicitud pendiente para hoy' }
+    }
+    if (forGoal?.status === 'confirmed') {
+      return { request: null, error: 'Esta meta ya está confirmada hoy' }
+    }
+
+    const { data, error } = await supabase
+      .from('goal_confirmation_requests')
+      .upsert(
+        {
+          user_id: userId,
+          goal_id: goal.id,
+          goal_title: goal.title,
+          goal_category: goal.category,
+          requester_name: requesterName,
+          date,
+          confirmer_share_code: code,
+          status: 'pending',
+          requester_note: note.trim(),
+          confirmed_by: null,
+          confirmed_at: null,
+        },
+        { onConflict: 'user_id,goal_id,date' },
+      )
+      .select()
+      .single()
+
+    return { request: data as GoalConfirmationRequest | null, error: error?.message ?? null }
+  },
+
+  async respondGoalConfirmation(
+    requestId: string,
+    accept: boolean,
+  ): Promise<{ status: string | null; error: string | null }> {
+    if (!supabase) return { status: null, error: 'No conectado' }
+    const { data, error } = await supabase.rpc('respond_goal_confirmation', {
+      p_request_id: requestId,
+      p_accept: accept,
+    })
+    if (error) return { status: null, error: error.message }
+    const result = data as { ok?: boolean; status?: string; error?: string }
+    if (result.error) return { status: null, error: result.error }
+    return { status: result.status ?? null, error: null }
   },
 }
 

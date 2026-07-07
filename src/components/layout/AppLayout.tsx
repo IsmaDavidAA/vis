@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { Home, BarChart3, Gift, Bell, LogOut } from 'lucide-react'
+import { Home, BarChart3, Users, Gift, Bell, LogOut, Target } from 'lucide-react'
 import { LifeBar, PointsBar } from '../ui/LifeBar'
 import { useAuth } from '../../context/AuthContext'
 
@@ -26,7 +26,9 @@ export function Header() {
 
 const navItems = [
   { to: '/dashboard', icon: Home, label: 'Inicio' },
+  { to: '/goals', icon: Target, label: 'Metas' },
   { to: '/metrics', icon: BarChart3, label: 'Métricas' },
+  { to: '/competitors', icon: Users, label: 'Reto' },
   { to: '/prizes', icon: Gift, label: 'Premios' },
   { to: '/alerts', icon: Bell, label: 'Alertas' },
 ]

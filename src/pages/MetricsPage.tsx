@@ -8,6 +8,8 @@ import { ComplianceRing } from '../components/ui/ComplianceRing'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { Alert } from '../components/ui/Alert'
+import { Modal } from '../components/ui/Modal'
+import { ConfirmDeleteModal } from '../components/ui/ConfirmDeleteModal'
 import { HabitWeekGrid, MonthHeatmap, buildCompletionMap } from '../components/HabitCalendar'
 import { METRIC_TEMPLATES, METRIC_CATEGORIES } from '../data/metricTemplates'
 import { resolveMetricTemplate } from '../lib/metricResolver'
@@ -16,8 +18,9 @@ import { localStore } from '../lib/localStore'
 import { shareStore } from '../lib/shareStore'
 import { api, getShareUrl } from '../lib/api'
 import { notifyMetricsProgress } from '../lib/telegram'
+import { getAllCategories } from '../lib/categories'
 import { useAuth } from '../context/AuthContext'
-import type { UserMetric, MetricEntry } from '../types'
+import type { UserMetric, MetricEntry, UserMetricCategory, Goal } from '../types'
 
 function todayStr() {
   return new Date().toISOString().split('T')[0]
@@ -37,21 +40,48 @@ export function MetricsPage() {
   const [viewCode, setViewCode] = useState('')
   const [alert, setAlert] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [customCategories, setCustomCategories] = useState<UserMetricCategory[]>([])
+  const [goals, setGoals] = useState<Goal[]>([])
+  const [addTab, setAddTab] = useState<'templates' | 'custom' | 'section'>('custom')
+  const [customHabit, setCustomHabit] = useState({
+    title: '',
+    description: '',
+    icon: '✨',
+    category: 'habitos',
+    goalId: '',
+    type: 'boolean' as 'boolean' | 'counter',
+    dailyTarget: 1,
+    unit: '',
+  })
+  const [newSection, setNewSection] = useState({ label: '', icon: '✨' })
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { type: 'habit'; id: string; name: string }
+    | { type: 'section'; id: string; name: string }
+    | null
+  >(null)
   const today = todayStr()
+  const allCategories = getAllCategories(customCategories)
+  const goalsInSelectedSection = goals.filter((g) => g.category === customHabit.category)
 
   const loadData = useCallback(async () => {
     if (isDemoMode) {
       setMetrics(localStore.getMetrics())
       setEntries(localStore.getMetricEntries())
+      setCustomCategories(localStore.getCustomCategories())
+      setGoals(localStore.getGoals())
       return
     }
     if (!user) return
-    const [m, e] = await Promise.all([
+    const [m, e, cats, g] = await Promise.all([
       api.getMetrics(user.id),
       api.getMetricEntries(user.id),
+      api.getCustomCategories(user.id),
+      api.getGoals(user.id),
     ])
     setMetrics(m)
     setEntries(e)
+    setCustomCategories(cats)
+    setGoals(g)
   }, [isDemoMode, user])
 
   useEffect(() => {
@@ -80,19 +110,121 @@ export function MetricsPage() {
     await refreshStats()
   }
 
-  const handleAdd = async (templateId: string) => {
-    if (busy) return
+  const handleAddCustom = async () => {
+    if (busy || !customHabit.title.trim()) {
+      setAlert({ type: 'error', message: 'Escribe el nombre del hábito' })
+      return
+    }
+    if (!customHabit.goalId) {
+      setAlert({
+        type: 'error',
+        message: 'Selecciona la meta. Créala en Metas si aún no tienes una en esta sección.',
+      })
+      return
+    }
     setBusy(true)
     try {
       if (isDemoMode) {
-        localStore.addMetric(templateId)
+        const created = localStore.addCustomHabit({
+          ...customHabit,
+          dailyTarget: customHabit.type === 'boolean' ? 1 : customHabit.dailyTarget,
+        })
+        if (!created) {
+          setAlert({ type: 'error', message: 'No se pudo crear el hábito' })
+          return
+        }
+        await refresh()
+        setCustomHabit({
+          title: '',
+          description: '',
+          icon: '✨',
+          category: 'habitos',
+          goalId: '',
+          type: 'boolean',
+          dailyTarget: 1,
+          unit: '',
+        })
+        setShowAdd(false)
+        setAlert({ type: 'success', message: 'Hábito creado' })
+        return
+      }
+      if (!user) return
+      const { error } = await api.addCustomHabit(user.id, {
+        ...customHabit,
+        dailyTarget: customHabit.type === 'boolean' ? 1 : customHabit.dailyTarget,
+      })
+      if (error) setAlert({ type: 'error', message: error })
+      else {
+        await refresh()
+        setCustomHabit({
+          title: '',
+          description: '',
+          icon: '✨',
+          category: 'habitos',
+          goalId: '',
+          type: 'boolean',
+          dailyTarget: 1,
+          unit: '',
+        })
+        setShowAdd(false)
+        setAlert({ type: 'success', message: 'Hábito creado' })
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleAddSection = async () => {
+    if (!newSection.label.trim()) return
+    setBusy(true)
+    if (isDemoMode) {
+      const cat = localStore.addCustomCategory(newSection.label, newSection.icon)
+      if (cat) {
+        setCustomCategories(localStore.getCustomCategories())
+        setCustomHabit((h) => ({ ...h, category: cat.id }))
+        setNewSection({ label: '', icon: '✨' })
+        setAlert({ type: 'success', message: 'Sección creada' })
+      }
+      setBusy(false)
+      return
+    }
+    if (!user) return
+    const { category, error } = await api.addCustomCategory(user.id, newSection.label, newSection.icon)
+    if (error) setAlert({ type: 'error', message: error })
+    else if (category) {
+      setCustomCategories((c) => [...c, category])
+      setCustomHabit((h) => ({ ...h, category: category.id }))
+      setNewSection({ label: '', icon: '✨' })
+      setAlert({ type: 'success', message: 'Sección creada' })
+    }
+    setBusy(false)
+  }
+
+  const handleAdd = async (templateId: string) => {
+    if (busy) return
+    if (!customHabit.goalId) {
+      setAlert({
+        type: 'error',
+        message: 'Elige sección y meta antes de agregar una plantilla.',
+      })
+      return
+    }
+    setBusy(true)
+    try {
+      if (isDemoMode) {
+        localStore.addMetric(templateId, customHabit.goalId, customHabit.category)
         await refresh()
         setShowAdd(false)
         setAlert({ type: 'success', message: 'Métrica agregada' })
         return
       }
       if (!user) return
-      const { error } = await api.addMetric(user.id, templateId)
+      const { error } = await api.addMetric(
+        user.id,
+        templateId,
+        customHabit.goalId,
+        customHabit.category,
+      )
       if (error) {
         setAlert({ type: 'error', message: error })
         return
@@ -153,16 +285,65 @@ export function MetricsPage() {
     else await afterMetricChange()
   }
 
-  const handleRemove = async (metricId: string) => {
-    if (isDemoMode) {
-      localStore.removeMetric(metricId)
-      await refresh()
-      return
+  const handleRemove = (metricId: string) => {
+    const metric = metrics.find((m) => m.id === metricId)
+    const template = metric ? resolveMetricTemplate(metric) : null
+    setDeleteTarget({
+      type: 'habit',
+      id: metricId,
+      name: template?.title ?? 'este hábito',
+    })
+  }
+
+  const handleRemoveSection = (categoryId: string, label: string) => {
+    setDeleteTarget({ type: 'section', id: categoryId, name: label })
+  }
+
+  const executeDelete = async () => {
+    if (!deleteTarget) return
+    setBusy(true)
+    try {
+      if (deleteTarget.type === 'habit') {
+        if (isDemoMode) {
+          localStore.removeMetric(deleteTarget.id)
+        } else if (user) {
+          const { error } = await api.removeMetric(user.id, deleteTarget.id)
+          if (error) {
+            setAlert({ type: 'error', message: error })
+            return
+          }
+        }
+        setAlert({ type: 'success', message: 'Hábito eliminado' })
+        await refresh()
+      } else {
+        const habitsInSection = activeMetrics.filter(
+          (m) => m.goal_category === deleteTarget.id,
+        )
+        const goalsInSection = goals.filter((g) => g.category === deleteTarget.id)
+        if (habitsInSection.length > 0 || goalsInSection.length > 0) {
+          setAlert({
+            type: 'error',
+            message: `Quita las ${goalsInSection.length} meta(s) y ${habitsInSection.length} hábito(s) de esta sección antes.`,
+          })
+          return
+        }
+        if (isDemoMode) {
+          localStore.removeCustomCategory(deleteTarget.id)
+          setCustomCategories(localStore.getCustomCategories())
+        } else if (user) {
+          const { error } = await api.removeCustomCategory(user.id, deleteTarget.id)
+          if (error) {
+            setAlert({ type: 'error', message: error })
+            return
+          }
+          setCustomCategories((cats) => cats.filter((c) => c.id !== deleteTarget.id))
+        }
+        setAlert({ type: 'success', message: 'Sección eliminada' })
+      }
+      setDeleteTarget(null)
+    } finally {
+      setBusy(false)
     }
-    if (!user) return
-    const { error } = await api.removeMetric(user.id, metricId)
-    if (error) setAlert({ type: 'error', message: error })
-    else await refresh()
   }
 
   const handleEnableShare = async () => {
@@ -228,6 +409,17 @@ export function MetricsPage() {
     return matchSearch && matchCat && notAdded
   })
 
+  const groupedMetrics = allCategories
+    .map((cat) => ({
+      ...cat,
+      items: activeMetrics.filter((m) => (m.goal_category ?? 'habitos') === cat.id),
+    }))
+    .filter((g) => g.items.length > 0)
+
+  const uncategorized = activeMetrics.filter(
+    (m) => !allCategories.some((c) => c.id === (m.goal_category ?? 'habitos')),
+  )
+
   return (
     <AppLayout>
       <div className="flex flex-col gap-6">
@@ -286,44 +478,293 @@ export function MetricsPage() {
           {activeMetrics.length === 0 ? (
             <Card className="text-center py-6">
               <p className="text-sm text-ink-muted mb-3">
-                Agrega métricas como cepillarte, dormir temprano, agua...
+                Crea tu primer hábito o elige de las plantillas.
               </p>
-              <Button size="sm" onClick={() => setShowAdd(true)}>
-                Explorar {METRIC_TEMPLATES.length} métricas
+              <Button size="sm" onClick={() => { setShowAdd(true); setAddTab('custom') }}>
+                Crear hábito propio
               </Button>
             </Card>
           ) : (
-            <div className="flex flex-col gap-3">
-              {activeMetrics.map((metric) => {
-                const template = resolveMetricTemplate(metric)
-                if (!template) return null
-                return (
-                  <div key={metric.id} className="relative">
-                    <MetricCard
-                      metric={metric}
-                      template={template}
-                      entries={entries}
-                      period={period}
-                      onIncrement={() => handleIncrement(metric.id)}
-                      onDecrement={() => handleDecrement(metric.id)}
-                      onToggle={() => handleToggle(metric.id)}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleRemove(metric.id)}
-                      className="absolute top-2 right-2 text-[10px] text-red-400 font-bold cursor-pointer hover:text-red-600"
-                    >
-                      ✕
-                    </button>
+            <div className="flex flex-col gap-5">
+              {groupedMetrics.map((group) => (
+                <div key={group.id}>
+                  <p className="text-xs font-bold text-ink-muted uppercase mb-2 flex items-center gap-1">
+                    <span>{group.icon}</span> {group.label}
+                  </p>
+                  <div className="flex flex-col gap-3">
+                    {group.items.map((metric) => {
+                      const template = resolveMetricTemplate(metric)
+                      if (!template) return null
+                      return (
+                        <div key={metric.id} className="relative">
+                          <MetricCard
+                            metric={metric}
+                            template={template}
+                            entries={entries}
+                            period={period}
+                            onIncrement={() => handleIncrement(metric.id)}
+                            onDecrement={() => handleDecrement(metric.id)}
+                            onToggle={() => handleToggle(metric.id)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRemove(metric.id)}
+                            className="absolute top-2 right-2 text-[10px] text-red-400 font-bold cursor-pointer hover:text-red-600"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )
+                    })}
                   </div>
-                )
-              })}
+                </div>
+              ))}
+              {uncategorized.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-ink-muted uppercase mb-2">Otros</p>
+                  <div className="flex flex-col gap-3">
+                    {uncategorized.map((metric) => {
+                      const template = resolveMetricTemplate(metric)
+                      if (!template) return null
+                      return (
+                        <div key={metric.id} className="relative">
+                          <MetricCard
+                            metric={metric}
+                            template={template}
+                            entries={entries}
+                            period={period}
+                            onIncrement={() => handleIncrement(metric.id)}
+                            onDecrement={() => handleDecrement(metric.id)}
+                            onToggle={() => handleToggle(metric.id)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRemove(metric.id)}
+                            className="absolute top-2 right-2 text-[10px] text-red-400 font-bold cursor-pointer hover:text-red-600"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {showAdd && (
-          <Card className="flex flex-col gap-3 animate-slide-up">
+        <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Agregar hábito">
+            <div className="flex gap-1">
+              {(['custom', 'templates', 'section'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setAddTab(tab)}
+                  className={`flex-1 py-2 rounded-xl text-[10px] font-bold cursor-pointer ${
+                    addTab === tab ? 'bg-forest text-white' : 'bg-ink/5'
+                  }`}
+                >
+                  {tab === 'custom' ? 'Crear hábito' : tab === 'templates' ? 'Plantillas' : 'Nueva sección'}
+                </button>
+              ))}
+            </div>
+
+            {addTab === 'custom' && (
+              <div className="flex flex-col gap-3">
+                <div className="flex gap-2">
+                  <Input
+                    label="Emoji"
+                    value={customHabit.icon}
+                    onChange={(e) => setCustomHabit((h) => ({ ...h, icon: e.target.value.slice(0, 4) }))}
+                    className="max-w-[4.5rem]"
+                  />
+                  <Input
+                    label="Nombre del hábito"
+                    value={customHabit.title}
+                    onChange={(e) => setCustomHabit((h) => ({ ...h, title: e.target.value }))}
+                    placeholder="Ej: Leer 10 páginas"
+                    className="flex-1"
+                  />
+                </div>
+                <Input
+                  label="Detalle (opcional)"
+                  value={customHabit.description}
+                  onChange={(e) => setCustomHabit((h) => ({ ...h, description: e.target.value }))}
+                />
+                <div>
+                  <p className="text-sm font-bold text-ink mb-1">Sección de vida</p>
+                  <select
+                    value={customHabit.category}
+                    onChange={(e) => {
+                      const category = e.target.value
+                      const firstGoal = goals.find((g) => g.category === category)?.id ?? ''
+                      setCustomHabit((h) => ({ ...h, category, goalId: firstGoal }))
+                    }}
+                    className="w-full px-3 py-2 rounded-xl cartoon-border-sm bg-white text-sm"
+                  >
+                    {allCategories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.icon} {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-ink mb-1">Meta vinculada</p>
+                  {goalsInSelectedSection.length === 0 ? (
+                    <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded-xl">
+                      No hay metas en esta sección.{' '}
+                      <Link to="/goals" className="font-bold underline">
+                        Créala en Metas
+                      </Link>
+                    </p>
+                  ) : (
+                    <select
+                      value={customHabit.goalId}
+                      onChange={(e) => setCustomHabit((h) => ({ ...h, goalId: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-xl cartoon-border-sm bg-white text-sm"
+                    >
+                      <option value="">Selecciona una meta</option>
+                      {goalsInSelectedSection.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.title}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <select
+                    value={customHabit.type}
+                    onChange={(e) =>
+                      setCustomHabit((h) => ({
+                        ...h,
+                        type: e.target.value as 'boolean' | 'counter',
+                      }))
+                    }
+                    className="flex-1 px-3 py-2 rounded-xl cartoon-border-sm text-sm bg-white"
+                  >
+                    <option value="boolean">Sí / No diario</option>
+                    <option value="counter">Contador</option>
+                  </select>
+                  {customHabit.type === 'counter' && (
+                    <>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={customHabit.dailyTarget}
+                        onChange={(e) =>
+                          setCustomHabit((h) => ({ ...h, dailyTarget: Number(e.target.value) || 1 }))
+                        }
+                        className="max-w-[4rem]"
+                      />
+                      <Input
+                        placeholder="unidad"
+                        value={customHabit.unit}
+                        onChange={(e) => setCustomHabit((h) => ({ ...h, unit: e.target.value }))}
+                        className="max-w-[5rem]"
+                      />
+                    </>
+                  )}
+                </div>
+                <Button fullWidth onClick={handleAddCustom} disabled={busy}>
+                  Guardar hábito
+                </Button>
+              </div>
+            )}
+
+            {addTab === 'section' && (
+              <div className="flex flex-col gap-3">
+                <p className="text-xs text-ink-muted">
+                  Crea una sección personalizada: trabajo, espiritualidad, creatividad...
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    label="Emoji"
+                    value={newSection.icon}
+                    onChange={(e) => setNewSection((s) => ({ ...s, icon: e.target.value.slice(0, 4) }))}
+                    className="max-w-[4.5rem]"
+                  />
+                  <Input
+                    label="Nombre de la sección"
+                    value={newSection.label}
+                    onChange={(e) => setNewSection((s) => ({ ...s, label: e.target.value }))}
+                    placeholder="Ej: Trabajo"
+                    className="flex-1"
+                  />
+                </div>
+                <Button fullWidth variant="secondary" onClick={handleAddSection} disabled={busy}>
+                  Crear sección
+                </Button>
+                {customCategories.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-[10px] font-bold text-ink-muted uppercase">Tus secciones</p>
+                    {customCategories.map((c) => (
+                      <div
+                        key={c.id}
+                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-forest/5"
+                      >
+                        <span className="text-sm font-bold text-ink">
+                          {c.icon} {c.label}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSection(c.id, c.label)}
+                          className="text-[10px] font-bold text-red-500 hover:text-red-700 cursor-pointer"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {addTab === 'templates' && (
+              <>
+            <div className="flex flex-col gap-2 mb-2">
+              <p className="text-xs font-bold text-ink-muted uppercase">Sección y meta</p>
+              <select
+                value={customHabit.category}
+                onChange={(e) => {
+                  const category = e.target.value
+                  const firstGoal = goals.find((g) => g.category === category)?.id ?? ''
+                  setCustomHabit((h) => ({ ...h, category, goalId: firstGoal }))
+                  setFilterCat(category === 'habitos' ? 'all' : category)
+                }}
+                className="w-full px-3 py-2 rounded-xl cartoon-border-sm bg-white text-sm"
+              >
+                {allCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.icon} {c.label}
+                  </option>
+                ))}
+              </select>
+              {goalsInSelectedSection.length === 0 ? (
+                <p className="text-xs text-amber-700">
+                  Crea una meta en{' '}
+                  <Link to="/goals" className="font-bold underline">
+                    Metas
+                  </Link>{' '}
+                  para esta sección.
+                </p>
+              ) : (
+                <select
+                  value={customHabit.goalId}
+                  onChange={(e) => setCustomHabit((h) => ({ ...h, goalId: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-xl cartoon-border-sm bg-white text-sm"
+                >
+                  <option value="">Selecciona meta</option>
+                  {goalsInSelectedSection.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.title}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
             <Input
               placeholder="Buscar métrica..."
               value={search}
@@ -376,8 +817,9 @@ export function MetricsPage() {
                 ))
               )}
             </div>
-          </Card>
-        )}
+              </>
+            )}
+        </Modal>
 
         <Card className="bg-forest/5">
           <div className="flex items-center gap-2 mb-3">
@@ -428,9 +870,34 @@ export function MetricsPage() {
                 Ver
               </Button>
             </Link>
+            <Link to={`/competitors?code=${viewCode}`}>
+              <Button size="md" variant="secondary" disabled={viewCode.length < 4}>
+                + Reto
+              </Button>
+            </Link>
           </div>
         </Card>
       </div>
+
+      <ConfirmDeleteModal
+        open={deleteTarget?.type === 'habit'}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={executeDelete}
+        busy={busy}
+        title="Eliminar hábito"
+        message={`Vas a eliminar "${deleteTarget?.type === 'habit' ? deleteTarget.name : ''}" y todo su historial de check-ins. Esta acción no se puede deshacer.`}
+        confirmPhrase="eliminar habito"
+      />
+
+      <ConfirmDeleteModal
+        open={deleteTarget?.type === 'section'}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={executeDelete}
+        busy={busy}
+        title="Eliminar sección"
+        message={`Vas a eliminar la sección "${deleteTarget?.type === 'section' ? deleteTarget.name : ''}". Solo puedes hacerlo si no tiene hábitos activos.`}
+        confirmPhrase="eliminar seccion"
+      />
     </AppLayout>
   )
 }

@@ -5,7 +5,8 @@ import { Button } from '../components/ui/Button'
 import { Alert } from '../components/ui/Alert'
 import { PrizeFigurine, PrizeCollection } from '../components/PrizeFigurine'
 import { MESSAGES } from '../data/messages'
-import { DEFAULT_PRIZES, PRIZE_UNLOCK_POINTS } from '../data/constants'
+import { DEFAULT_PRIZES } from '../data/constants'
+import { canUnlockPrize, nextStreakUnlock } from '../lib/prizes'
 import { useAuth } from '../context/AuthContext'
 import { localStore } from '../lib/localStore'
 import { api } from '../lib/api'
@@ -16,26 +17,22 @@ export function PrizesPage() {
   const { stats, user, isDemoMode } = useAuth()
   const [prizes] = useState<Prize[]>(DEFAULT_PRIZES)
   const [collected, setCollected] = useState<string[]>([])
-  const [slots, setSlots] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   const refresh = async () => {
     if (isDemoMode) {
       setCollected(localStore.getCollectedPrizes())
-      setSlots(localStore.getAvailableCollectionSlots())
       return
     }
     if (!user) return
     const owned = await api.getCollectedPrizes(user.id)
     setCollected(owned)
-    const earned = Math.floor(stats.total_points / PRIZE_UNLOCK_POINTS)
-    setSlots(Math.max(0, earned - owned.length))
   }
 
   useEffect(() => {
     refresh()
-  }, [isDemoMode, stats.total_points, user?.id])
+  }, [isDemoMode, stats.streak, user?.id])
 
   const handleCollect = async (prizeId: string) => {
     const prize = prizes.find((p) => p.id === prizeId)
@@ -53,7 +50,7 @@ export function PrizesPage() {
     }
 
     if (!user) return
-    const { error } = await api.collectPrize(user.id, prizeId, stats.total_points)
+    const { error } = await api.collectPrize(user.id, prizeId, stats.streak, stats.total_points)
     if (error) {
       setAlert({ type: 'error', message: error })
       return
@@ -71,8 +68,7 @@ export function PrizesPage() {
   }
 
   const selected = prizes.find((p) => p.id === selectedId)
-  const nextUnlockAt =
-    (Math.floor(stats.total_points / PRIZE_UNLOCK_POINTS) + 1) * PRIZE_UNLOCK_POINTS
+  const nextStreak = nextStreakUnlock(collected.length)
 
   return (
     <AppLayout>
@@ -80,13 +76,25 @@ export function PrizesPage() {
         <div>
           <h1 className="font-serif text-2xl font-bold text-ink">{MESSAGES.prizeTitle}</h1>
           <p className="text-sm text-ink-muted">
-            Colecciona figuritas. Cada {PRIZE_UNLOCK_POINTS} pts desbloqueas una nueva.
+            Premios sencillos entre ustedes. Se desbloquean con racha de hábitos.
           </p>
         </div>
 
         {alert && (
           <Alert type={alert.type} message={alert.message} onClose={() => setAlert(null)} />
         )}
+
+        <Card className="flex items-center gap-4 bg-forest/5">
+          <span className="text-3xl">🔥</span>
+          <div>
+            <p className="font-extrabold text-ink">Racha actual: {stats.streak} días</p>
+            <p className="text-xs text-ink-muted">
+              {collected.length < prizes.length
+                ? `Próxima figurita disponible con ${nextStreak} días de racha`
+                : '¡Álbum completo!'}
+            </p>
+          </div>
+        </Card>
 
         <Card>
           <PrizeCollection
@@ -95,20 +103,6 @@ export function PrizesPage() {
             onSelect={(id) => setSelectedId(id)}
           />
         </Card>
-
-        {slots > 0 && (
-          <Alert
-            type="success"
-            message={`Tienes ${slots} figurita${slots > 1 ? 's' : ''} por desbloquear. Elige abajo.`}
-          />
-        )}
-
-        {slots === 0 && collected.length < prizes.length && (
-          <Alert
-            type="info"
-            message={`Te faltan ${Math.max(0, nextUnlockAt - stats.total_points)} pts para la siguiente figurita.`}
-          />
-        )}
 
         {selected && (
           <Card className="flex items-center gap-4 bg-forest/5">
@@ -121,7 +115,7 @@ export function PrizesPage() {
               <p className="font-extrabold text-ink">{selected.title}</p>
               <p className="text-sm text-ink-muted mt-1">{selected.description}</p>
               <span className="inline-block mt-2 text-[10px] font-extrabold uppercase bg-forest/10 text-forest px-2 py-0.5 rounded-full">
-                Premio doble
+                Racha {selected.streakRequired}d · Premio doble
               </span>
             </div>
           </Card>
@@ -132,7 +126,7 @@ export function PrizesPage() {
           <div className="grid grid-cols-1 gap-3">
             {prizes.map((prize) => {
               const owned = collected.includes(prize.id)
-              const canCollect = slots > 0 && !owned
+              const unlock = canUnlockPrize(prize, stats.streak, stats.total_points, collected)
               return (
                 <Card
                   key={prize.id}
@@ -143,12 +137,18 @@ export function PrizesPage() {
                     <div className="flex-1 min-w-0">
                       <p className="font-extrabold text-ink">{prize.title}</p>
                       <p className="text-sm text-ink-muted mt-0.5">{prize.description}</p>
+                      <p className="text-[10px] font-bold text-forest mt-1">
+                        🔥 Racha {prize.streakRequired} días
+                      </p>
                       {owned && (
                         <p className="text-xs font-bold text-forest mt-2">✓ En tu colección</p>
                       )}
+                      {!owned && !unlock.ok && (
+                        <p className="text-xs text-ink-muted mt-1">{unlock.reason}</p>
+                      )}
                     </div>
                   </div>
-                  {canCollect && (
+                  {unlock.ok && (
                     <Button size="sm" className="mt-3" onClick={() => handleCollect(prize.id)}>
                       Desbloquear figurita
                     </Button>

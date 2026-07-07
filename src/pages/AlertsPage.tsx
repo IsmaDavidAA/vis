@@ -16,7 +16,7 @@ import {
 const NOTIFY_EVENTS = [
   { icon: '📈', title: 'Progreso de métricas', desc: 'Al llegar al 50%, 70% o 100% del día' },
   { icon: '🏆', title: 'Día completo', desc: 'Cuando llena todas sus métricas' },
-  { icon: '⭐', title: 'Meta cumplida', desc: 'Cuando marca “Cumplí” en una meta' },
+  { icon: '⭐', title: 'Meta cumplida', desc: 'Cuando un amigo confirma que cumpliste una meta' },
   { icon: '😤', title: 'Fail / vidas', desc: 'Cuando marca “No” o le quedan pocas vidas' },
   { icon: '🎁', title: 'Premio desbloqueado', desc: 'Qué figurita eligió tu pareja' },
   { icon: '🔥', title: 'Racha', desc: 'Hitos de racha (7, 14, 30 días)' },

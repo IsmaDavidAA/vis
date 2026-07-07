@@ -1,4 +1,4 @@
-import type { GoalCategory, Month } from '../types'
+import type { GoalCategory, Month, Prize } from '../types'
 
 export const GOAL_CATEGORIES: {
   id: GoalCategory
@@ -88,23 +88,24 @@ export const MONTHS: { id: Month; label: string }[] = [
   { id: 'diciembre', label: 'Diciembre' },
 ]
 
-export const DEFAULT_PRIZES = [
-  { id: '1', title: 'Desayuno en cama', description: 'El otro te prepara desayuno un domingo. Sin excusas.', icon: '🥐', color: '#fbbf24', is_double: true },
-  { id: '2', title: 'Elige la película', description: 'Tú eliges peli o serie. El otro ve sin quejarse.', icon: '🎬', color: '#6366f1', is_double: true },
-  { id: '3', title: 'Masaje de 15 min', description: 'El otro te da masaje de hombros y espalda. Timer incluido.', icon: '💆', color: '#ec4899', is_double: true },
-  { id: '4', title: 'Semana sin platos', description: 'El otro lava los platos toda la semana. Tú solo miras.', icon: '🫧', color: '#38bdf8', is_double: true },
-  { id: '5', title: 'Paseo a tu elección', description: 'Eliges ruta, parque o lugar. Van juntos, gratis.', icon: '🌳', color: '#22c55e', is_double: true },
-  { id: '6', title: 'Carta de gratitud', description: 'El otro te escribe una carta bonita a mano. Sin ChatGPT.', icon: '💌', color: '#f472b6', is_double: true },
-  { id: '7', title: 'Café por 3 mañanas', description: 'El otro te prepara café o té 3 mañanas seguidas.', icon: '☕', color: '#a16207', is_double: true },
-  { id: '8', title: 'Noche de juegos', description: 'Tú eliges el juego de mesa o cartas. Juegan juntos.', icon: '🎲', color: '#8b5cf6', is_double: true },
-  { id: '9', title: 'Cocina mi favorito', description: 'El otro cocina tu platillo favorito. Tú eliges cuál.', icon: '🍲', color: '#ef4444', is_double: true },
-  { id: '10', title: '3 favores canjeables', description: 'Guardas 3 favores pequeños: hacer la cama, un errand, lo que sea.', icon: '🎟️', color: '#14b8a6', is_double: true },
-  { id: '11', title: 'Tarde planificada gratis', description: 'Tú planeas una tarde sin gastar: picnic, parque, biblioteca.', icon: '🧺', color: '#84cc16', is_double: true },
-  { id: '12', title: 'Karaoke en casa', description: 'Eliges 5 canciones. Cantan juntos en la sala.', icon: '🎤', color: '#e879f9', is_double: true },
-  { id: '13', title: 'Fotos tontas en el parque', description: '30 min de fotos divertidas juntos. El otro no puede poner cara seria.', icon: '📸', color: '#0ea5e9', is_double: true },
-  { id: '14', title: 'Playlist para manejar', description: 'Armas la playlist. Manejan juntos a donde quieras.', icon: '🎧', color: '#a855f7', is_double: true },
-  { id: '15', title: 'Un sábado tú mandas', description: 'Tú decides qué hacen un sábado completo. Sin gastar mucho.', icon: '👑', color: '#f59e0b', is_double: true },
-  { id: '16', title: 'Gloria eterna', description: 'El otro admite en voz alta que ganaste. Una vez. Con testigos.', icon: '🏅', color: '#eab308', is_double: true },
+/** Premios dobles sencillos — se desbloquean con racha de hábitos */
+export const DEFAULT_PRIZES: Prize[] = [
+  { id: '1', title: 'Elegir la música', description: 'Tú pones la playlist en el carro o en casa. Sin quejas.', icon: '🎵', color: '#a855f7', is_double: true, streakRequired: 3 },
+  { id: '2', title: 'Abrazo de 20 seg', description: 'El otro te debe un abrazo largo. Timer en el cel.', icon: '🤗', color: '#f472b6', is_double: true, streakRequired: 5 },
+  { id: '3', title: 'Té o café hecho', description: 'Te preparan tu bebida favorita una mañana.', icon: '☕', color: '#a16207', is_double: true, streakRequired: 7 },
+  { id: '4', title: 'Mensaje bonito', description: 'Un mensaje de voz o texto que te haga sonreír.', icon: '💬', color: '#38bdf8', is_double: true, streakRequired: 10 },
+  { id: '5', title: 'Elegir película', description: 'Tú eliges qué ver. El otro no cambia el canal.', icon: '🎬', color: '#6366f1', is_double: true, streakRequired: 12 },
+  { id: '6', title: '5 min de masaje', description: 'Hombros o espalda. Solo 5 min, pero con ganas.', icon: '💆', color: '#ec4899', is_double: true, streakRequired: 14 },
+  { id: '7', title: 'Favor pequeño', description: 'Un favor sencillo: traer algo, guardar algo, lo que pidas.', icon: '🎟️', color: '#14b8a6', is_double: true, streakRequired: 17 },
+  { id: '8', title: 'Cocinar juntos', description: 'Cocinan algo fácil juntos. Tú eliges el menú.', icon: '🍳', color: '#ef4444', is_double: true, streakRequired: 21 },
+  { id: '9', title: 'Paseo corto', description: '15 min caminando juntos. Tú eliges la ruta.', icon: '🚶', color: '#22c55e', is_double: true, streakRequired: 24 },
+  { id: '10', title: 'Cartita escrita', description: 'Una nota a mano. Corta pero sincera.', icon: '💌', color: '#f472b6', is_double: true, streakRequired: 28 },
+  { id: '11', title: 'Noche de juegos', description: 'Cartas, dominó o lo que tengan. Tú eliges.', icon: '🎲', color: '#8b5cf6', is_double: true, streakRequired: 30 },
+  { id: '12', title: 'Desayuno sorpresa', description: 'Te preparan algo simple para desayunar un día.', icon: '🥐', color: '#fbbf24', is_double: true, streakRequired: 35 },
+  { id: '13', title: 'Selfie tonta', description: 'Foto graciosa juntos. Sin filtros exagerados.', icon: '📸', color: '#0ea5e9', is_double: true, streakRequired: 40 },
+  { id: '14', title: 'Una hora libre', description: 'El otro cubre una tarea tuya por 1 hora.', icon: '⏰', color: '#84cc16', is_double: true, streakRequired: 45 },
+  { id: '15', title: 'Elogio en voz alta', description: 'Te dicen algo bueno frente a alguien más.', icon: '✨', color: '#eab308', is_double: true, streakRequired: 50 },
+  { id: '16', title: 'Gloria del reto', description: 'Admiten que vas ganando el reto de hábitos. Una vez.', icon: '🏅', color: '#f59e0b', is_double: true, streakRequired: 60 },
 ]
 
 export const PRIZE_UNLOCK_POINTS = 50
